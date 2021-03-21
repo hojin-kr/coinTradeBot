@@ -13,7 +13,6 @@ import sys
 ACCESS_TOKEN = ''   # coinone access token
 SECRET_KEY = bytes('', 'utf-8') # coinone secret key
 LINE_NOTIFY_TOKEN = ''   # line notify token
-AVG_PERIOD_TIME = 21600   # avg period time
 
 def get_encoded_payload(payload):
     payload['nonce'] = int(time.time() * 1000)
@@ -134,15 +133,19 @@ class Bot :
 def run() :
     bot = Bot()
     action = "none"
-    print(bot.getAvg(AVG_PERIOD_TIME))
     # 이전 거래가 완료됨
     if bot.checkPastTrade() :
-        print(bot.order_last[0])
         if bot.order_last[0] == "buy" :
-            action = "sell"
+            # 내가 가지고 있는데
+            # 값이 오르고 있으면 유지
+            # 값이 떨어지고 있으면 매도
+            if bot.getAvg(3600*24) > bot.getAvg(3600*1) :
+                action = "sell"
         elif bot.order_last[0] == "sell" :
-            action = "buy"
-    # checkPastTrade 무시하고 강제 오더 가능
+            # 내가 안가지고 있는데,
+            # 값이 오르고 있으면 매수
+            if bot.getAvg(3600*24) < bot.getAvg(3600*1) :
+                action = "buy"
     if action == "buy" :
         bot.buy()
     elif action == "sell" :
