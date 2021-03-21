@@ -13,7 +13,7 @@ import sys
 ACCESS_TOKEN = ''   # coinone access token
 SECRET_KEY = bytes('', 'utf-8') # coinone secret key
 LINE_NOTIFY_TOKEN = ''   # line notify token
-AVG_STANDARD_TIME = 21600   # 평균 기준 기간 6시간
+AVG_PERIOD_TIME = 21600   # avg period time
 
 def get_encoded_payload(payload):
     payload['nonce'] = int(time.time() * 1000)
@@ -37,168 +37,115 @@ def get_response(action, payload):
     response, content = http.request(url, 'POST', body=encoded_payload, headers=headers)
     return content
 
-def current_trade_price():
-    now_trades = urllib.request.urlopen("https://api.coinone.co.kr/trades").read()  # 현재 거래 완료 리스트
-    return float(json.loads(now_trades.decode('utf-8')).get('completeOrders')[0]['price'])    # 현재가
+# line notify send
+def line_notify(message):
+    if LINE_NOTIFY_TOKEN :
+        os.system("curl -X POST -H 'Authorization: Bearer " + LINE_NOTIFY_TOKEN + "' -F 'message=" + message +"' https://notify-api.line.me/api/notify")
 
-# 전체 기간 중 평균 대비 최대 증감율
-def period_price_avg_rate(avg_standard_time, current_price, _time):
-    f = open('./trades/trades.txt', mode='rt')
-    # 라인별로 json 형태로 되어 있어 전체를 라인별 배열로 로드
-    trades = f.readlines()
-    f.close()
-    priceTotal = 0  # 원하는 기간 동안의 거래 금액을 총합
-    tradeCnt = 0
-    min = 999999999999
-    max = 0
-    for list in trades:
-            try:
-                    if _time - AVG_STANDARD_TIME < int(float(json.loads(list).get('timestamp'))) :
-                            price = json.loads(list).get('price')
-                            priceTotal += int(float(price))
-                            tradeCnt += 1
-                            if float(price) > float(max):
-                                max = float(price)
-                            if float(price) < float(min):
-                                min = float(price)
-            # json 파싱 실패
-            except Exception as e:
-                    e
-    avg =  priceTotal/tradeCnt
-    current_diff = float(((current_price - avg) / avg) * 100)   # 평균 대비 현재가의 증감율
-    period_price = min
-    if abs(avg - min) < abs(avg - max):
-        period_price = max
-    period_diff = float((period_price - avg) / avg * 100)
-    return period_diff
+class Bot :
+    def __init__(self) :
+        self.current_price = float(json.loads(urllib.request.urlopen("https://api.coinone.co.kr/trades").read().decode('utf-8')).get('completeOrders')[0]['price'])
+        self.time = time.time()
+        self.order_last = tailer.tail(open('./orders/orders.txt'), 1)[0].split(':')  # 서버에 저장된 마지막 거래 기록
 
-# 평균 대비 현재가의 증감율
-def period_price_current_rate(avg_standard_time, current_price, _time):
-    f = open('./trades/trades.txt', mode='rt')
-    # 라인별로 json 형태로 되어 있어 전체를 라인별 배열로 로드
-    trades = f.readlines()
-    f.close()
-    priceTotal = 0  # 원하는 기간 동안의 거래 금액을 총합
-    tradeCnt = 0
-    min = 999999999999
-    max = 0
-    for list in trades:
-            try:
-                    if _time - AVG_STANDARD_TIME < int(float(json.loads(list).get('timestamp'))) :
-                            price = json.loads(list).get('price')
-                            priceTotal += int(float(price))
-                            tradeCnt += 1
-                            if float(price) > float(max):
-                                max = float(price)
-                            if float(price) < float(min):
-                                min = float(price)
-            # json 파싱 실패
-            except Exception as e:
-                    e
-    avg =  priceTotal/tradeCnt
-    current_diff = float(((current_price - avg) / avg) * 100)
-    return current_diff
+    def getAvg(self, period) :
+        time = self.time - period
+        f = open('./trades/trades.txt', mode='rt')
+        trades = f.readlines()
+        f.close()
+        total = 0
+        cnt = 0
+        for list in trades :
+            timestamp = int(json.loads(list).get('timestamp'))
+            if time < timestamp :
+                total += float(json.loads(list).get('price'))
+                cnt += float(1)
+        return int(total / cnt)
 
-# 매수 매도 기록
-def record(action, price, time, orderId, qty):
-    f = open('./orders/orders.txt', mode='at')
-    f.writelines(str(action) + ':' +  str(price) + ':'+ str(time) + ':' + str(orderId) + ':' + str(qty) +'\n')
-    f.close()
+    def getQty(self, type="krw") :
+        balance = get_response(action='v2/account/balance', payload={'access_token': ACCESS_TOKEN,})
+        avail = json.loads(balance.decode('utf-8')).get(type)['avail'] # 거래 가능 원화
+        return float(avail)/float(self.current_price) # 거래 가능 갯수
 
-def line_notify(token, message):
-    os.system("curl -X POST -H 'Authorization: Bearer " + token + "' -F 'message=" + message +"' https://notify-api.line.me/api/notify")
-_time = time.time()
-current_price  = current_trade_price()  # 현재 거래 가격
-period_diff = period_price_avg_rate(AVG_STANDARD_TIME, current_price, _time)  # 전체 기간 중 평균 대비 최대 증감율
-current_diff = period_price_current_rate(AVG_STANDARD_TIME, current_price, _time)  # 평균 대비 현재가의 증감율
-if sys.argv[1] != 'buy' and sys.argv[1] != 'sell':
-    lastOrders = tailer.tail(open('./orders/orders.txt'), 1)[0].split(':')  # 서버에 저장된 마지막 거래 기록
-# 자산
-balance = get_response(action='v2/account/balance', payload={
-    'access_token': ACCESS_TOKEN,
-})
-krw_avail = json.loads(balance.decode('utf-8')).get('krw')['avail'] # 거래 가능 원화
-qty = float(krw_avail)/float(current_price) # 거래 가능 갯수
-# 거래 여부 판단
-action = 'none'
-if sys.argv[1] == 'buy' or sys.argv[1] == 'sell':
-    action = sys.argv[1]
-# 가격 차이가 정한 전체 평균 대비 증감률 보다 크고 이전 매수가격 보다 높으면 전량 매도 (이 순간 한번 이득)
-if action == 'none' and lastOrders[0] == 'buy' and current_diff > period_diff and current_price > float(lastOrders[1]):
-    # 이전 거래가 완료 됬었는지 확인
-    pastOrderInfo = get_response(action='v2/order/order_info', payload={
-        'access_token': ACCESS_TOKEN,
-        'order_id': lastOrders[3],
-        'currency': 'BTC',
-    })
-    orderCode = json.loads(pastOrderInfo.decode('utf-8')).get('errorCode')
-    # 해당 주문 아이디가 없다고 나옴 -> 거래 완료
-    if orderCode == '104':
-        action = 'sell'
-    if orderCode == '0':
-        if json.loads(pastOrderInfo.decode('utf-8')).get('status') == 'filled':
-            action = 'sell'
-# 매수 가능 상태이고 가격 차이가 정한 전체 평균 대비 증감률 보다 낮으면 전량 매수
-if action == 'none' and lastOrders[0] == 'sell' and current_diff < period_diff:
-    pastOrderInfo = get_response(action='v2/order/order_info', payload={
-        'access_token': ACCESS_TOKEN,
-        'order_id': lastOrders[3],
-        'currency': 'BTC',
-    })
-    orderCode = json.loads(pastOrderInfo.decode('utf-8')).get('errorCode')
-    # 해당 주문 아이디가 없다고 나옴 - > 거래 완료
-    if orderCode == '104':
-        action = 'buy'
-    if orderCode == '0':
-        if json.loads(pastOrderInfo.decode('utf-8')).get('status') == 'filled':
-            action = 'buy'
-# 매수 및 기록
-if action == 'buy':
-    # 현재 금액 확인
-    order = get_response(action='v2/order/limit_buy', payload={
-        'access_token': ACCESS_TOKEN,
-        'price': round(current_price),
-        'qty': str(qty)[:6],
-        'currency': 'BTC',
-    })
-    orderId = json.loads(order.decode('utf-8')).get('orderId')
-    errorCode = json.loads(order.decode('utf-8')).get('errorCode')
-    if errorCode == '0':
-        record(action, current_price, _time, orderId, qty)
-    if errorCode != '0':
-        errorMessage = "## buy error code  ##\n"
-        errorMessage += "Code %s \n" % str(errorCode)
-        errorMessage += "current_price %s \n" % str(current_price)
-        errorMessage += str(qty)[:6]
-        line_notify(LINE_NOTIFY_TOKEN, errorMessage)
-# 메도 및 기록
-if action == 'sell':
-    qty = json.loads(balance.decode('utf-8')).get('btc')['avail'] # 거래 가능 BTC
-    order = get_response(action='v2/order/limit_sell', payload={
-        'access_token': ACCESS_TOKEN,
-            'price': round(current_price),
-        'qty': str(qty)[:6],
-        'currency': 'BTC',
-    })
-    orderId = json.loads(order.decode('utf-8')).get('orderId')
-    errorCode = json.loads(order.decode('utf-8')).get('errorCode')
-    if errorCode == '0':
-        record(action, current_price, _time, orderId, qty)
-    if errorCode != '0':
-        errorMessage = "## sell error code  ##\n"
-        errorMessage += "Code %s \n" % str(errorCode)
-        errorMessage += "current_price %s \n" % str(current_price)
-        errorMessage += str(qty)[:6]
-        line_notify(LINE_NOTIFY_TOKEN, errorMessage)
+    def record(action, price, orderId, qty) :
+        f = open('./orders/orders.txt', mode='at')
+        f.writelines("{}:{}:{}:{}:{}\n".format(action, price, self.time, orderId, qty))
+        f.close()
 
-# make result message
-message = "[BTC]\n"
-message += "CURRENT: %s \n" % format(current_price, ',')
-message += "DIFF : %.6f%%\n" % current_diff
-message += "PERIOD DIFF : %.6f%% \n" % period_diff
-message += "ACTION : %s \n" % action
-message += "KRW : %s\n" % krw_avail
-message += "QTY: %s\n" % str(qty)[:6]
-print(message)
-# send line noti
-line_notify(LINE_NOTIFY_TOKEN, message)
+    def checkPastTrade(self) :
+        # 이전 거래가 완료 됬었는지 확인
+        res = get_response(action='v2/order/order_info', payload={
+            'access_token': ACCESS_TOKEN,
+            'order_id': self.order_last[3],
+            'currency': 'BTC',
+        })
+        code = json.loads(res.decode('utf-8')).get('errorCode')
+        # 해당 주문 아이디가 없다고 나옴 -> 거래 완료
+        if code == '104':
+            return True
+        if code == '0':
+            if json.loads(res.decode('utf-8')).get('status') == 'filled':
+                return True
+        return False
+
+    def buy(self) :
+        qty = self.getQty("krw")
+        res = get_response(action='v2/order/limit_buy', payload={
+            'access_token': ACCESS_TOKEN,
+            'price': round(self.current_price),
+            'qty': str(qty)[:6],
+            'currency': 'BTC',
+        })
+        order = json.loads(res.decode('utf-8'))
+        orderId = order.get('orderId')
+        code = order.get('errorCode')
+        if code == '0':
+            record("buy", self.current_price, orderId, qty)
+        if code != '0':
+            message = "## buy error code  ##\n"
+            message += "Code %s \n" % str(code)
+            message += "errormsg {} \n".format(order.get("errorMsg"))
+            message += "current_price %s \n" % str(self.current_price)
+            message += str(qty)[:6]
+            line_notify(message)
+    def sell(self) :
+        qty = self.getQty("btc")
+        res = get_response(action='v2/order/limit_sell', payload={
+            'access_token': ACCESS_TOKEN,
+            'price': round(self.current_price),
+            'qty': str(qty)[:6],
+            'currency': 'BTC',
+        })
+        print(res)
+        order = json.loads(res.decode('utf-8'))
+        orderId = order.get('orderId')
+        code = order.get('errorCode')
+        if code == '0':
+            record("sell", self.current_price, orderId, qty)
+        if code != '0':
+            message = "## sell error code  ##\n"
+            message += "Code %s \n" % str(code)
+            message += "errormsg {} \n".format(order.get("errorMsg"))
+            message += "current_price %s \n" % str(self.current_price)
+            message += str(qty)[:6]
+            line_notify(message)
+
+
+def run() :
+    bot = Bot()
+    action = "none"
+    print(bot.getAvg(AVG_PERIOD_TIME))
+    # 이전 거래가 완료됨
+    if bot.checkPastTrade() :
+        print(bot.order_last[0])
+        if bot.order_last[0] == "buy" :
+            action = "sell"
+        elif bot.order_last[0] == "sell" :
+            action = "buy"
+    # checkPastTrade 무시하고 강제 오더 가능
+    if action == "buy" :
+        bot.buy()
+    elif action == "sell" :
+        bot.sell()
+    line_notify(action)
+run()
