@@ -64,12 +64,13 @@ class Bot :
     def getQty(self, type="krw") :
         balance = get_response(action='v2/account/balance', payload={'access_token': ACCESS_TOKEN,})
         avail = json.loads(balance.decode('utf-8')).get(type)['avail'] # 거래 가능 원화
-        return float(avail)/float(self.current_price) # 거래 가능 갯수
+        return float(avail)
 
-    def record(action, price, orderId, qty) :
+    def record(self, action, price, orderId, qty) :
         f = open('./orders/orders.txt', mode='at')
         f.writelines("{}:{}:{}:{}:{}\n".format(action, price, self.time, orderId, qty))
         f.close()
+        line_notify("{}:{}:{}:{}:{}\n".format(action, price, self.time, orderId, qty))
 
     def checkPastTrade(self) :
         # 이전 거래가 완료 됬었는지 확인
@@ -88,7 +89,7 @@ class Bot :
         return False
 
     def buy(self) :
-        qty = self.getQty("krw")
+        qty = self.getQty("krw")/float(self.current_price)
         res = get_response(action='v2/order/limit_buy', payload={
             'access_token': ACCESS_TOKEN,
             'price': round(self.current_price),
@@ -99,7 +100,7 @@ class Bot :
         orderId = order.get('orderId')
         code = order.get('errorCode')
         if code == '0':
-            record("buy", self.current_price, orderId, qty)
+            self.record("buy", self.current_price, orderId, qty)
         if code != '0':
             message = "## buy error code  ##\n"
             message += "Code %s \n" % str(code)
@@ -120,7 +121,7 @@ class Bot :
         orderId = order.get('orderId')
         code = order.get('errorCode')
         if code == '0':
-            record("sell", self.current_price, orderId, qty)
+            self.record("sell", self.current_price, orderId, qty)
         if code != '0':
             message = "## sell error code  ##\n"
             message += "Code %s \n" % str(code)
@@ -143,12 +144,11 @@ def run() :
                 action = "sell"
         elif bot.order_last[0] == "sell" :
             # 내가 안가지고 있는데,
-            # 값이 오르고 있으면 매수
+            # 값이 오르고 있으면 매수q
             if bot.getAvg(3600*24) < bot.getAvg(3600*1) :
                 action = "buy"
-    if action == "buy" :
+    if action == "buy" or sys.argv[1] == "buy" :
         bot.buy()
-    elif action == "sell" :
+    elif action == "sell" or sys.argv[1] == "sell":
         bot.sell()
-    line_notify(action)
 run()
