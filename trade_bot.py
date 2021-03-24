@@ -137,14 +137,17 @@ def run() :
     # 이전 거래가 완료됨
     if bot.checkPastTrade() :
         if bot.order_last[0] == "buy" :
-            # 내가 가지고 있는데
-            # 값이 오르고 있으면 유지
-            # 값이 떨어지고 있으면 매도
-            if bot.getAvg(3600*24) > bot.getAvg(3600*1) :
+            # 내가 가지고 있음 오르면 가지고 있고 내려가면 팔아야함
+            # 가지고 있는것보다 크고, 상승세면 유지
+            # 가지고 있는것보다 크고, 하락세면 매도
+            # 가지고 있는것보다 내려가면 바로 매도
+            if float(bot.current_price) > float(bot.order_last[1]) and bot.getAvg(3600*24) > bot.getAvg(3600*1) :
+                action = "sell"
+            if float(bot.current_price) < float(bot.order_last[1]) :
                 action = "sell"
         elif bot.order_last[0] == "sell" :
-            # 내가 안가지고 있는데,
-            # 값이 오르고 있으면 매수q
+            # 내가 가지고 있지 않은 상황, 낮을때 사거나 오를것 같을때 사야함
+            # 상승세가 되면 매수
             if bot.getAvg(3600*24) < bot.getAvg(3600*1) :
                 action = "buy"
     if action == "buy" or sys.argv[1] == "buy" :
