@@ -61,7 +61,7 @@ def parse_current_trades(quote_currency,target_currency,size):
 
 class Bot :
     def __init__(self) :
-        self.current_price = float(json.loads(urllib.request.urlopen("https://api.coinone.co.kr/trades").read().decode('utf-8')).get('completeOrders')[0]['price'])
+        self.current_price = float(json.loads(urllib.request.urlopen("https://api.coinone.co.kr/public/v2/trades/krw/wemix?size=10").read().decode('utf-8')).get('completeOrders')[0]['price'])
         self.time = time.time()
         self.order_last = tailer.tail(open('./orders/orders.txt'), 1)[0].split(':')  # 서버에 저장된 마지막 거래 기록
 
@@ -128,6 +128,7 @@ class Bot :
             line_notify(message)
     def sell(self) :
         qty = self.getQty("wemix")
+        print(qty)
         res = get_response(action='v2/order/limit_sell', payload={
             'access_token': ACCESS_TOKEN,
             'price': round(self.current_price),
